@@ -11,66 +11,82 @@
 #define WIND_SPEED_PIN 27
 #define WIND_DIRECTION_PIN 35
 
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"  // TODO: Regénérer les UUID spécifiquement pour nous
-#define CHARACTERISTIC_TX_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331911a"  // TODO: Regénérer les UUID spécifiquement pour nous
+#define CHARACTERISTIC_TX_UUID "beb5483e-36e1-4688-b7f5-ea07361b261a"
 
 static int32_t twosComplement(int32_t value, uint8_t size);
 static void writeByte(int deviceAddr, int dataAddr, int data);
 static uint8_t readByte(int deviceAddr, int dataAddr);
 static void readBytes(int deviceAddr, int dataAddr, int length, uint8_t* oResult);
 static void printArray(int* array, int length);
-static void calculateBaro(uint8_t* temperature, uint8_t* pressure);
+static void calculateBaro(uint8_t* temperature, uint8_t* press);
 static void configureBaro();
 static void readBarometer();
 static void readLight();
 static void readHumitidy();
 static void readPrecipitation();
-static void readWind();
+static void readWindDirection();
+static void readWindSpeed();
 static void configureBluetooth();
 static void sendToBluetooth(std::string data);
+static void sendToUART(std::string data);
 static std::string generateFormatedData();
 
 // Variable for bluetooth
-BLECharacteristic *pCharacteristicTX
+static BLECharacteristic *pCharacteristicTX;
 
 // Variable for barometer
-int16_t c0;
-int16_t c1;
-int32_t c00;
-int32_t c10;
-int16_t c01;
-int16_t c11;
-int16_t c20;
-int16_t c21;
-int16_t c30;
-float tempScaleFactor;
-float pressureScaleFactor;
+static int16_t c0;
+static int16_t c1;
+static int32_t c00;
+static int32_t c10;
+static int16_t c01;
+static int16_t c11;
+static int16_t c20;
+static int16_t c21;
+static int16_t c30;
+static float tempScaleFactor;
+static float pressureScaleFactor;
+
+// Variable for wind
+static int windDirectionVoltage[] = {3035, 3519, 3885, 2387, 990, 577, 210, 1700};
+static char* windDirectionValues[] = {"N", "NO", "O", "SO", "S", "SE", "E", "NE"};
+static unsigned long lastResetTime = 0;
+static int windSpeedClick = 0;
 
 // Sensor measurements
-float temperatureBaro;
-float pressure;
-float light;
-float humidity;
-float temperatureHumid;
-float precipitation;
-float windSpeed;
-char* windDirection;
+static float temperatureBaro = 0.0;
+static float pressure = 0.0;
+static float light = 0.0;
+static float humidity = 0.0;
+static float temperatureHumid = 0.0;
+static float precipitation = 0.0;
+static float windSpeed = 0.0;
+static char* windDirection = "";
 
 void setup() {
   Serial.begin(115200);
+  Serial2.begin(115200);
   Wire.begin();
   configureBluetooth();
   configureBaro();
+  pinMode(PRECIPITATION_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PRECIPITATION_PIN), readPrecipitation, RISING);
+
+  pinMode(WIND_SPEED_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(WIND_SPEED_PIN), readWindSpeed, RISING);
 }
 
 void loop() {
   readBarometer();
   readHumidity();
-  
-
+  readLight();
+  readWindDirection();
   
   std::string formatedSensorData = generateFormatedData();
   sendToBluetooth(formatedSensorData);
+  
+  //sendToUART(formatedSensorData);
 
   delay(1000);
 }
@@ -85,7 +101,8 @@ static void configureBluetooth()
   pCharacteristicTX = pService->createCharacteristic(
                                          CHARACTERISTIC_TX_UUID,
                                          BLECharacteristic::PROPERTY_READ |
-                                         BLECharacteristic::PROPERTY_WRITE
+                                         BLECharacteristic::PROPERTY_WRITE |
+                                         BLECharacteristic::PROPERTY_NOTIFY
                                        );
 
   pCharacteristicTX->setValue("Hello World says Dame Nature");
@@ -104,6 +121,12 @@ static void sendToBluetooth(std::string data)
 {
   pCharacteristicTX->setValue(data);
   pCharacteristicTX->notify();
+
+}
+
+static void sendToUART(std::string data)
+{
+  Serial2.println(data.c_str());
 
 }
 
@@ -162,8 +185,7 @@ static void printArray(int* array, int length)
 
 static void readLight()
 {
-  // TODO
-  light = 1.2f;
+  light = analogRead(LIGHT_PIN);
 }
 
 static void readBarometer()
@@ -175,7 +197,7 @@ static void readBarometer()
   calculateBaro(temperatureBuf, pressureBuf);
 }
 
-static void calculateBaro(uint8_t* temperature, uint8_t* pressure)
+static void calculateBaro(uint8_t* temperature, uint8_t* press)
 {
   // Convert temperature to int
   int32_t tempRaw = twosComplement(((uint32_t)(temperature[0]) << 16) | ((uint32_t)(temperature[1]) << 8) | temperature[2], 24);
@@ -183,7 +205,7 @@ static void calculateBaro(uint8_t* temperature, uint8_t* pressure)
   
   temperatureBaro = (c0*0.5f) + (c1*tempRawScaled);
 
-  int32_t pressureRaw = twosComplement(((uint32_t)(pressure[0]) << 16) | ((uint32_t)(pressure[1]) << 8) | pressure[2], 24);
+  int32_t pressureRaw = twosComplement(((uint32_t)(press[0]) << 16) | ((uint32_t)(press[1]) << 8) | press[2], 24);
   float pressureRawScaled = pressureRaw/pressureScaleFactor;
 
   pressure = c00 + pressureRawScaled * (c10 + pressureRawScaled * (c20 + pressureRawScaled * c30)) + tempRawScaled * c01 + tempRawScaled * pressureRawScaled * (c11 + pressureRawScaled * c21);
@@ -271,29 +293,48 @@ static void readHumidity()
 
 static void readPrecipitation()
 {
-  // TODO
-  precipitation = 1.2f;
+  precipitation += 0.2794/2.0;
 }
 
-static void readWind()
+static void readWindDirection()
 {
-  // TODO
-  windDirection = 'E';
-  windSpeed = 1.2f;
+  
+  int windDirectionRaw = analogRead(WIND_DIRECTION_PIN);
+  for (int i = 0; i < 8; i++)
+  {
+    if ((windDirectionRaw >= (windDirectionVoltage[i] -100)) && (windDirectionRaw <= (windDirectionVoltage[i] + 100)))
+    {
+      windDirection = windDirectionValues[i];
+      break;
+    }
+  }
+}
+
+static void readWindSpeed()
+{
+  if (millis() >= lastResetTime + 1000)
+  {
+    windSpeed = windSpeedClick * 2.4;
+    windSpeedClick = 0;
+    lastResetTime = millis();
+  }
+  else
+    windSpeedClick += 1;
 }
 
 static std::string generateFormatedData()
 {
-  const char* data;
+  char data[1024];
 
   sprintf(data, "\n*************************\n"
                 "Pression: %f Pa\n"
                 "Temperature: %f degreC\n"
-                "Lumière: %f \n"
+                "Lumière: %f Lx\n"
                 "Humidité: %f %%\n"
                 "Précipitation: %f mm\n"
-                "Vitesse du vent: %f m/s\n"
+                "Vitesse du vent: %f km/h\n"
                 "Direction du vent: %s\n",
-                pressure, temperatureBaro, light, humidity, precipitation, windSpeed, windDirection);
+                pressure, temperatureBaro, light/10.0, humidity, precipitation, windSpeed, windDirection);
+  printf(data);
   return (std::string)data;
 }
