@@ -1,8 +1,7 @@
 /**
- * A BLE client example that is rich in capabilities.
- * There is a lot new capabilities implemented.
- * author unknown
- * updated by chegewara
+Authors : Étienne Beaulieu beae0601 and Emile Bureau bure1301
+APP2 S6 - May 22nd 2024
+BLE Client code to read values received from the weather station
  */
 
 #include "BLEDevice.h"
@@ -19,6 +18,11 @@ static boolean doScan = false;
 static BLERemoteCharacteristic* pRemoteCharacteristic;
 static BLEAdvertisedDevice* myDevice;
 
+
+// Callback method to communicate between both ESPs.
+// Once we receive a notify, we read the values from the message
+// and print them in a serial monitor.
+// Notify is sent on server side.
 static void notifyCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
   uint8_t* pData,
@@ -147,8 +151,7 @@ void loop() {
     doConnect = false;
   }
 
-  // If we are connected to a peer BLE Server, update the characteristic each time we are reached
-  // with the current time since boot.
+  //Print the elapsed time since booting this script
   if (connected) {
     String newValue = "Time in seconds since booting this ESP32: " + String(millis()/1000);
     Serial.println(newValue + "\"");
