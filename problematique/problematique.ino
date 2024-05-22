@@ -1,9 +1,12 @@
+// Code de Étienne Beaulieu et Emile Bureau
+// beae0601 et bure1301
 #include "Wire.h"
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <string>
 
+// Définition des pin et adresses des capteurs
 #define BARO_ADDRESS 0x77
 #define LIGHT_PIN 34
 #define HUMIDITY_PIN 16
@@ -11,6 +14,7 @@
 #define WIND_SPEED_PIN 27
 #define WIND_DIRECTION_PIN 35
 
+// Définition des UUID nécessaire au Bluetooth
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331911a"  // TODO: Regénérer les UUID spécifiquement pour nous
 #define CHARACTERISTIC_TX_UUID "beb5483e-36e1-4688-b7f5-ea07361b261a"
 
@@ -35,7 +39,7 @@ static std::string generateFormatedData();
 // Variable for bluetooth
 static BLECharacteristic *pCharacteristicTX;
 
-// Variable for barometer
+// Variables for barometer
 static int16_t c0;
 static int16_t c1;
 static int32_t c00;
@@ -48,7 +52,7 @@ static int16_t c30;
 static float tempScaleFactor;
 static float pressureScaleFactor;
 
-// Variable for wind
+// Variables for wind sensor
 static int windDirectionVoltage[] = {3035, 3519, 3885, 2387, 990, 577, 210, 1700};
 static char* windDirectionValues[] = {"N", "NO", "O", "SO", "S", "SE", "E", "NE"};
 static unsigned long lastResetTime = 0;
@@ -70,6 +74,8 @@ void setup() {
   Wire.begin();
   configureBluetooth();
   configureBaro();
+  
+  // Setup des interrupt
   pinMode(PRECIPITATION_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PRECIPITATION_PIN), readPrecipitation, RISING);
 
@@ -78,11 +84,13 @@ void setup() {
 }
 
 void loop() {
+  // Lecture de tous les capteurs
   readBarometer();
   readHumidity();
   readLight();
   readWindDirection();
   
+  // Générer le messsage à envoyer en Bluetooth ou en UART
   std::string formatedSensorData = generateFormatedData();
   sendToBluetooth(formatedSensorData);
   
@@ -93,6 +101,7 @@ void loop() {
 
 static void configureBluetooth()
 {
+  // Code pris de l'exemple BLE_Server
   Serial.println("Starting BLE work!");
 
   BLEDevice::init("Station Meteo beae0601");
@@ -173,6 +182,7 @@ static void readBytesI2C(int deviceAddr, int dataAddr, int length, uint8_t* oRes
   }
 }
 
+// For debug purposes
 static void printArray(int* array, int length)
 {
   Serial.println();
@@ -244,6 +254,7 @@ static void configureBaro()
   c30 = twosComplement((coef[16] << 8) | coef[17],16);
 }
 
+// Code venant du labo
 static void readHumidity()
 {
   int i, j;
@@ -298,7 +309,7 @@ static void readPrecipitation()
 
 static void readWindDirection()
 {
-  
+  // Match la lecture du sensor avec la table de référence pour trouver la direction
   int windDirectionRaw = analogRead(WIND_DIRECTION_PIN);
   for (int i = 0; i < 8; i++)
   {
@@ -327,12 +338,12 @@ static std::string generateFormatedData()
   char data[1024];
 
   sprintf(data, "\n*************************\n"
-                "Pression: %f Pa\n"
-                "Temperature: %f degreC\n"
-                "Lumière: %f Lx\n"
-                "Humidité: %f %%\n"
-                "Précipitation: %f mm\n"
-                "Vitesse du vent: %f km/h\n"
+                "Pression: %.2f Pa\n"
+                "Temperature: %.2f degreC\n"
+                "Lumière: %.2f Lx\n"
+                "Humidité: %.2f \%\n"
+                "Précipitation: %.2f mm\n"
+                "Vitesse du vent: %.2f km/h\n"
                 "Direction du vent: %s\n",
                 pressure, temperatureBaro, light/10.0, humidity, precipitation, windSpeed, windDirection);
   printf(data);
